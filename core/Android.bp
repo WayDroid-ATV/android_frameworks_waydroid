@@ -57,11 +57,17 @@ filegroup {
 java_library_static {
     name: "framework-waydroid.static",
     srcs: [":framework-waydroid-sources"],
+    static_libs: [
+        "vendor.waydroid.clipboard-V1.0-java",
+    ],
 }
 
 java_sdk_library {
     name: "framework-waydroid",
     srcs: [":framework-waydroid-sources"],
+    static_libs: [
+        "vendor.waydroid.clipboard-V1.0-java",
+    ],
 
     api_packages: ["framework-waydroid"],
     dist_group: "waydroid",
