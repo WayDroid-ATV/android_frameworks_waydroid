@@ -21,6 +21,7 @@
     <!-- Defines external services to be started by the WayDroidSystemServer at boot. The service itself
          should publish as a binder services in its onStart -->
     <string-array name="config_externalWayDroidServices">
+        <item>id.waydro.server.WayDroidService</item>
     </string-array>
 
 </resources>
