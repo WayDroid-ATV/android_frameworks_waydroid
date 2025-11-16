@@ -16,9 +16,11 @@
 
 package id.waydro.server;
 
+import android.app.Notification;
 import android.app.PendingIntent;
 import android.annotation.NonNull;
 import android.content.ActivityNotFoundException;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -33,11 +35,14 @@ import android.os.UserHandle;
 import android.provider.Settings;
 import android.util.Log;
 import android.net.Uri;
-import android.graphics.drawable.Drawable;
 import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.Icon;
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.Config;
 import android.graphics.Canvas;
+import android.service.notification.NotificationListenerService;
+import android.service.notification.StatusBarNotification;
 
 import com.android.internal.content.PackageMonitor;
 import com.android.internal.os.BackgroundThread;
@@ -50,9 +55,14 @@ import id.waydro.waydroid.IPlatform;
 import id.waydro.waydroid.Platform;
 import id.waydro.waydroid.IUserMonitor;
 import id.waydro.waydroid.UserMonitor;
+import id.waydro.waydroid.INotifications;
+import id.waydro.waydroid.Notifications;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -73,6 +83,14 @@ public class WayDroidService extends SystemService {
     private Context mContext;
     private PackageManager mPm = null;
     private UserMonitor mUM = null;
+    private Notifications mWaydroidNotifications = null;
+    private NotificationListenerService mSystemNotificationListener = null;
+
+    // Map android notification id -> host notification id
+    private Map<String, Integer> mNotificationIdMap = new HashMap<String, Integer>();
+
+    // Map (host notification id, host action id) -> PendingIntent
+    private Map<Integer, Map<String, PendingIntent>> mNotificationActionsMap = new HashMap<Integer, Map<String, PendingIntent>>();
 
     public WayDroidService(Context context) {
         super(context);
@@ -89,11 +107,19 @@ public class WayDroidService extends SystemService {
         publishBinderService(WaydroidContextConstants.WAYDROID_PLATFORM_SERVICE, mPlatformService);
         if (mContext != null) {
             mUM = UserMonitor.getInstance(mContext);
+            try {
+                mWaydroidNotifications = Notifications.getInstance(mContext);
+            } catch (Exception e) {
+                Log.w(TAG, e.getMessage());
+            }
         } else {
             Log.w(TAG, "No context available");
         }
         if (mUM != null) {
             registerPackageMonitor();
+        }
+        if (mWaydroidNotifications != null) {
+            registerNotificationListener();
         }
     }
 
@@ -131,7 +157,7 @@ public class WayDroidService extends SystemService {
         if (icon == null)
             return;
 
-        Bitmap iconBitmap = drawableToBitmap(icon);
+        Bitmap iconBitmap = drawableToBitmap(icon, false);
         File imageFile = new File(ICONS_DIR, packageName + ".png");
         FileOutputStream fileOutStream = null;
         try {
@@ -152,8 +178,8 @@ public class WayDroidService extends SystemService {
         imageFile.setWritable(true, false);
     }
 
-    private Bitmap drawableToBitmap(Drawable drawable) {
-        if (drawable instanceof BitmapDrawable)
+    private Bitmap drawableToBitmap(Drawable drawable, boolean force) {
+        if (!force && drawable instanceof BitmapDrawable)
             return ((BitmapDrawable)drawable).getBitmap();
 
         Bitmap bitmap = Bitmap.createBitmap(drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight(), Config.ARGB_8888);
@@ -194,6 +220,175 @@ public class WayDroidService extends SystemService {
         };
 
         monitor.register(mContext, BackgroundThread.getHandler().getLooper(), UserHandle.ALL, true);
+    }
+
+    private static long idCounter = 0;
+    public static String nextId() {
+        return String.valueOf(idCounter++);
+    }
+
+    private void registerNotificationListener() {
+        mNotificationIdMap.clear();
+        mNotificationActionsMap.clear();
+        mSystemNotificationListener = new NotificationListenerService() {
+            private INotifications.ImageData getImageData(Notification notification) {
+                Icon icon = notification.getLargeIcon();
+                if (icon == null) {
+                    return null;
+                }
+
+                Drawable drawable = icon.loadDrawable(mContext);
+                Bitmap bitmap = drawableToBitmap(drawable, true);
+                int width = bitmap.getWidth();
+                int height = bitmap.getHeight();
+                int channels = 4;
+                int rowstride = width * channels;
+                int pixels[] = new int[width * height];
+                bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+                byte bytes[] = new byte[rowstride * height];
+                for (int i = 0; i < pixels.length; i++) {
+                    int color = pixels[i];
+                    bytes[0 + i * channels] = (byte)((color >> 16) & 0xff); // B
+                    bytes[1 + i * channels] = (byte)((color >> 8) & 0xff);  // G
+                    bytes[2 + i * channels] = (byte)((color >> 0) & 0xff);  // R
+                    bytes[3 + i * channels] = (byte)((color >> 24) & 0xff); // A
+                }
+
+                INotifications.ImageData imageData = new INotifications.ImageData();
+                imageData.width = width;
+                imageData.height = height;
+                imageData.rowstride = rowstride;
+                imageData.has_alpha = true;
+                imageData.data = bytes;
+                return imageData;
+            }
+
+            @Override
+            public void onListenerConnected() {
+                Log.i(TAG, "Connected to system notification manager");
+            }
+
+            @Override
+            public void onNotificationPosted(StatusBarNotification sbn) {
+                String key = sbn.getKey();
+                String packageName = sbn.getPackageName();
+                Notification notification = sbn.getNotification();
+
+                if (notification.isForegroundService()) {
+                    return;
+                }
+
+                String appName = _getAppName(packageName);
+                String summary = notification.extras.getString(Notification.EXTRA_TITLE, "");
+                String body = notification.extras.getString(Notification.EXTRA_TEXT, "");
+
+                List<INotifications.Action> hostActions = new LinkedList<INotifications.Action>();
+                Map<String, PendingIntent> actionMap = new HashMap<String, PendingIntent>();
+
+                if (notification.contentIntent != null) {
+                    INotifications.Action defaultAction = new INotifications.Action();
+                    defaultAction.id = "default";
+                    defaultAction.label = "";
+                    hostActions.add(defaultAction);
+                    actionMap.put(defaultAction.id, notification.contentIntent);
+                }
+
+                if (notification.actions != null) {
+                    for (Notification.Action androidAction : notification.actions) {
+                        if (androidAction.actionIntent != null) {
+                            String label = androidAction.title.toString();
+                            String hostActionId = nextId();
+
+                            INotifications.Action hostAction = new INotifications.Action();
+                            hostAction.id = hostActionId;
+                            hostAction.label = label;
+
+                            hostActions.add(hostAction);
+                            actionMap.put(hostActionId, androidAction.actionIntent);
+                        }
+                    }
+                }
+
+                INotifications.ImageData image = getImageData(notification);
+
+                String category = ""; // TODO: try to map Android category to FDO category
+                boolean suppressSound = true; // TODO: consider playing the sound on the desktop and silencing android instead
+                int expireTimeout = INotifications.TIMEOUT_DEFAULT;
+                boolean isResident = true;
+                boolean isTransient = false;
+                byte urgency = INotifications.Urgency.NORMAL; // TODO: try to map Android importance to FDO urgency
+
+                int existingId = mNotificationIdMap.getOrDefault(key, INotifications.ID_NONE);
+
+                int newId = mWaydroidNotifications.notify(existingId, appName, packageName, summary, body,
+                                              hostActions, image, category, suppressSound, expireTimeout,
+                                              isResident, isTransient, urgency);
+                if (newId == INotifications.ID_NONE) {
+                    return;
+                }
+
+                mNotificationIdMap.put(key, newId);
+                mNotificationActionsMap.put(newId, actionMap);
+            }
+
+            @Override
+            public void onNotificationRemoved(StatusBarNotification sbn) {
+                String key = sbn.getKey();
+                Integer id = mNotificationIdMap.get(key);
+                mNotificationIdMap.remove(key);
+                if (id != null) {
+                    mNotificationActionsMap.remove(id);
+                    mWaydroidNotifications.closeNotification(id);
+                }
+            }
+        };
+
+        try {
+            mSystemNotificationListener.registerAsSystemService(mContext,
+                    new ComponentName(mContext.getPackageName(), getClass().getCanonicalName()),
+                    UserHandle.USER_ALL);
+        } catch (RemoteException e) {
+            Log.e(TAG, "Unable to register system notification listener", e);
+        }
+
+        mWaydroidNotifications.registerListener(new INotifications.INotificationCallback.Stub() {
+            @Override
+            public void onActionInvoked(int notificationId, String actionId, String xdgActivationToken) {
+                Map<String, PendingIntent> innerMap = mNotificationActionsMap.get(notificationId);
+                if (innerMap == null)
+                    return;
+                PendingIntent intent = innerMap.get(actionId);
+                if (intent == null)
+                    return;
+
+                try {
+                    intent.send();
+                } catch (PendingIntent.CanceledException e) {
+                    Log.i(TAG, "Canceled notification action: " + e.getMessage());
+                }
+
+                // TODO: Activate window through hwcomposer
+            }
+        });
+    }
+
+    private String _getAppName(String packageName) {
+        if (mPm == null || mContext == null)
+            return "";
+
+        ApplicationInfo appInfo;
+        try {
+            appInfo = mPm.getApplicationInfo(packageName, 0);
+        } catch (NameNotFoundException e) {
+            Log.e(TAG, e.getMessage());
+            return "";
+        }
+        String name = appInfo.name;
+        CharSequence label = appInfo.loadLabel(mPm);
+        if (label != null)
+            name = label.toString();
+
+        return name;
     }
 
     /* Service */
@@ -394,22 +589,7 @@ public class WayDroidService extends SystemService {
 
         @Override
         public String getAppName(String packageName) {
-            if (mPm == null || mContext == null)
-                return "";
-
-            ApplicationInfo appInfo;
-            try {
-                appInfo = mPm.getApplicationInfo(packageName, 0);
-            } catch (NameNotFoundException e) {
-                Log.e(TAG, e.getMessage());
-                return "";
-            }
-            String name = appInfo.name;
-            CharSequence label = appInfo.loadLabel(mPm);
-            if (label != null)
-                name = label.toString();
-
-            return name;
+            return _getAppName(packageName);
         }
 
         @Override
