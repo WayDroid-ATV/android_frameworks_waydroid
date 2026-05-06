@@ -150,4 +150,23 @@ public class Hardware {
         }
         return;
     }
+
+    public void shutdownRequest(String reason) {
+        IHardware service = getService();
+        if (service == null) {
+            return;
+        }
+        try {
+            service.shutdownRequest(reason);
+        } catch (RemoteException | RuntimeException e) {
+            if (reason != null && reason.startsWith("1")) {
+                // Fallback to reboot() if the call was not implemented on the host side
+                Log.d(TAG, "IHardware.shutdownRequest not implemented, falling back to IHardware.reboot");
+                reboot();
+            } else {
+                Log.e(TAG, e.getLocalizedMessage(), e);
+            }
+        }
+        return;
+    }
 }
