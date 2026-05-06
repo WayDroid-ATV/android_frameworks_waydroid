@@ -24,4 +24,5 @@ interface IHardware {
     void reboot();
     void upgrade(String system_zip, int system_time, String vendor_zip, int vendor_time);
     void upgrade2(String system_zip, long system_time, String vendor_zip, long vendor_time);
+    oneway void shutdownRequest(String reason);
 }

@@ -20,9 +20,11 @@ import android.app.Notification;
 import android.app.PendingIntent;
 import android.annotation.NonNull;
 import android.content.ActivityNotFoundException;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
@@ -51,6 +53,8 @@ import com.android.server.SystemService;
 
 import id.waydro.app.WaydroidContextConstants;
 import id.waydro.waydroid.AppInfo;
+import id.waydro.waydroid.IHardware;
+import id.waydro.waydroid.Hardware;
 import id.waydro.waydroid.IPlatform;
 import id.waydro.waydroid.Platform;
 import id.waydro.waydroid.IUserMonitor;
@@ -83,6 +87,7 @@ public class WayDroidService extends SystemService {
     private Context mContext;
     private PackageManager mPm = null;
     private UserMonitor mUM = null;
+    private Hardware mWaydroidHardware = null;
     private Notifications mWaydroidNotifications = null;
     private NotificationListenerService mSystemNotificationListener = null;
 
@@ -107,6 +112,7 @@ public class WayDroidService extends SystemService {
         publishBinderService(WaydroidContextConstants.WAYDROID_PLATFORM_SERVICE, mPlatformService);
         if (mContext != null) {
             mUM = UserMonitor.getInstance(mContext);
+            mWaydroidHardware = Hardware.getInstance(mContext);
             try {
                 mWaydroidNotifications = Notifications.getInstance(mContext);
             } catch (Exception e) {
@@ -120,6 +126,9 @@ public class WayDroidService extends SystemService {
         }
         if (mWaydroidNotifications != null) {
             registerNotificationListener();
+        }
+        if (mWaydroidHardware != null) {
+            registerShutdownHandler();
         }
     }
 
@@ -384,6 +393,20 @@ public class WayDroidService extends SystemService {
                 // TODO: Activate window through hwcomposer
             }
         });
+    }
+
+    private void registerShutdownHandler() {
+        IntentFilter filter = new IntentFilter();
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                Log.i(TAG, "Android is shutting down");
+                mWaydroidHardware.shutdownRequest(SystemProperties.get("sys.shutdown.requested"));
+            }
+        };
+
+        filter.addAction(Intent.ACTION_SHUTDOWN);
+        mContext.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
     }
 
     private String _getAppName(String packageName) {
