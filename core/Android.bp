@@ -30,7 +30,17 @@ filegroup {
 }
 
 filegroup {
+    name: "framework-waydroid.api.combined.public.latest",
+    srcs: ["api/current.txt"],
+}
+
+filegroup {
     name: "framework-waydroid-removed.api.public.latest",
+    srcs: ["api/removed.txt"],
+}
+
+filegroup {
+    name: "framework-waydroid-removed.api.combined.public.latest",
     srcs: ["api/removed.txt"],
 }
 
@@ -45,12 +55,37 @@ filegroup {
 }
 
 filegroup {
+    name: "framework-waydroid.api.combined.system.latest",
+    srcs: ["api/system-current.txt"],
+}
+
+filegroup {
     name: "framework-waydroid-removed.api.system.latest",
     srcs: ["api/system-removed.txt"],
 }
 
 filegroup {
+    name: "framework-waydroid-removed.api.combined.system.latest",
+    srcs: ["api/system-removed.txt"],
+}
+
+filegroup {
     name: "framework-waydroid-incompatibilities.api.system.latest",
+    srcs: ["api/test-current.txt"],
+}
+
+filegroup {
+    name: "framework-waydroid.api.combined.test.latest",
+    srcs: ["api/test-current.txt"],
+}
+
+filegroup {
+    name: "framework-waydroid-removed.api.combined.test.latest",
+    srcs: ["api/test-removed.txt"],
+}
+
+filegroup {
+    name: "framework-waydroid-incompatibilities.api.test.latest",
     srcs: ["api/test-current.txt"],
 }
 
