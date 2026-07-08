@@ -17,6 +17,8 @@
 package id.waydro.server;
 
 import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.annotation.NonNull;
 import android.content.ActivityNotFoundException;
@@ -48,6 +50,7 @@ import android.service.notification.StatusBarNotification;
 
 import com.android.internal.content.PackageMonitor;
 import com.android.internal.os.BackgroundThread;
+import com.android.internal.R;
 
 import com.android.server.SystemService;
 
@@ -84,11 +87,19 @@ public class WayDroidService extends SystemService {
             "id.waydro.waydroid.ACTION_UNINSTALL_COMMIT";
     private static final String ICONS_DIR = "/data/icons";
 
+    private static final String WAYDROID_CHANNEL_ID = "WaydroidService";
+    private static final String WAYDROID_CHANNEL_ID_TV = "WaydroidService.tv";
+
+    private static final int INTEGRATION_WARN_ID = 1;
+    private static final int DMABUF_WARN_ID = 1 << 2;
+    private static final int SW_RENDERING_WARN_ID = 1 << 3;
+
     private Context mContext;
     private PackageManager mPm = null;
     private UserMonitor mUM = null;
     private Hardware mWaydroidHardware = null;
     private Notifications mWaydroidNotifications = null;
+    private NotificationManager mNotificationManager = null;
     private NotificationListenerService mSystemNotificationListener = null;
 
     // Map android notification id -> host notification id
@@ -135,6 +146,53 @@ public class WayDroidService extends SystemService {
     }
 
     @Override
+    public void onBootPhase(int phase) {
+        if (phase == PHASE_BOOT_COMPLETED) {
+            mNotificationManager = mContext.getSystemService(NotificationManager.class);
+
+            if (mUM == null && !SystemProperties.get("waydroid.tools_version").isEmpty()) {
+                Log.w(TAG, "Waydroid integration is not functional");
+                showNotification(
+                    INTEGRATION_WARN_ID,
+                    mContext.getString(R.string.broken_waydroid_integration_title),
+                    mContext.getString(R.string.broken_waydroid_integration_msg),
+                    mContext.getString(R.string.broken_waydroid_integration_url)
+                );
+            }
+
+            if (!new File("/dev/dma_heap/system").exists()) {
+                Log.w(TAG, "DMA-BUF system heap is missing");
+                showNotification(
+                    DMABUF_WARN_ID,
+                    mContext.getString(R.string.dmabuf_missing_title),
+                    mContext.getString(R.string.dmabuf_missing_msg),
+                    mContext.getString(R.string.dmabuf_missing_url)
+                );
+            }
+
+            if (SystemProperties.get("ro.hardware.egl").equals("angle") && SystemProperties.get("ro.hardware.vulkan").equals("pastel")) {
+                if (SystemProperties.getBoolean("ro.waydroid.unsupported_nvidia_kmd", false)) {
+                    Log.w(TAG, "Unsupported NVIDIA kernel driver detected");
+                    showNotification(
+                        SW_RENDERING_WARN_ID,
+                        mContext.getString(R.string.unsupported_nvidia_kmd_title),
+                        mContext.getString(R.string.unsupported_nvidia_kmd_msg),
+                        mContext.getString(R.string.unsupported_nvidia_kmd_url)
+                    );
+                } else {
+                    Log.w(TAG, "Waydroid is running without GPU acceleration");
+                    showNotification(
+                        SW_RENDERING_WARN_ID,
+                        mContext.getString(R.string.sw_rendering_title),
+                        mContext.getString(R.string.sw_rendering_msg),
+                        mContext.getString(R.string.sw_rendering_url)
+                    );
+                }
+            }
+        }
+    }
+
+    @Override
     public void onUserUnlocked(@NonNull TargetUser user) {
         List<ApplicationInfo> apps = mPm.getInstalledApplications(0);
         for (int n = 0; n < apps.size(); n++) {
@@ -158,10 +216,53 @@ public class WayDroidService extends SystemService {
         }
     }
 
+    private boolean isTv() {
+        return mPm.hasSystemFeature(PackageManager.FEATURE_LEANBACK);
+    }
+
+    private void createNotificationChannelIfNeeded() {
+        String id = !isTv() ? WAYDROID_CHANNEL_ID : WAYDROID_CHANNEL_ID_TV;
+
+        if (mNotificationManager.getNotificationChannel(id) != null) {
+            return;
+        }
+
+        String name = mContext.getString(R.string.waydroid_notification_channel);
+        int importance = NotificationManager.IMPORTANCE_HIGH;
+        NotificationChannel channel = new NotificationChannel(id, name, importance);
+        channel.setBlockable(true);
+        mNotificationManager.createNotificationChannel(channel);
+    }
+
+    private void showNotification(int notificationId, String title, String message, String url) {
+        createNotificationChannelIfNeeded();
+
+        Notification.Builder notification = new Notification.Builder(mContext, WAYDROID_CHANNEL_ID)
+                .setContentTitle(title)
+                .setContentText(message)
+                .setStyle(new Notification.BigTextStyle().bigText(message))
+                .setAutoCancel(true)
+                .setColor(mContext.getColor(R.color.color_error))
+                .setSmallIcon(R.drawable.ic_warning)
+                .extend(new Notification.TvExtender().setChannelId(WAYDROID_CHANNEL_ID_TV));
+
+        if (url != null) {
+            PendingIntent pendingIntent = PendingIntent.getActivity(
+                mContext, 0,
+                new Intent(Intent.ACTION_VIEW, Uri.parse(url)),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            );
+
+            notification.setContentIntent(pendingIntent);
+        }
+
+        mNotificationManager.notify(notificationId, notification.build());
+    }
+
     private Intent getAppLaunchIntent(String packageName) {
         Intent launchIntent = null;
 
-        if (mPm.hasSystemFeature(PackageManager.FEATURE_LEANBACK)) {
+        if (isTv()) {
             launchIntent = mPm.getLeanbackLaunchIntentForPackage(packageName);
         }
 

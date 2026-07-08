@@ -52,7 +52,7 @@ public class UserMonitor {
         if (sInstance == null) {
             sInstance = new UserMonitor(context);
         }
-        return sInstance;
+        return sService != null ? sInstance : null;
     }
 
     /** @hide **/
