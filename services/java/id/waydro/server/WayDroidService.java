@@ -113,10 +113,12 @@ public class WayDroidService extends SystemService {
         if (mContext != null) {
             mUM = UserMonitor.getInstance(mContext);
             mWaydroidHardware = Hardware.getInstance(mContext);
-            try {
-                mWaydroidNotifications = Notifications.getInstance(mContext);
-            } catch (Exception e) {
-                Log.w(TAG, e.getMessage());
+            if (SystemProperties.getBoolean("persist.waydroid.forward_notifications", false)) {
+                try {
+                    mWaydroidNotifications = Notifications.getInstance(mContext);
+                } catch (Exception e) {
+                    Log.w(TAG, e.getMessage());
+                }
             }
         } else {
             Log.w(TAG, "No context available");
