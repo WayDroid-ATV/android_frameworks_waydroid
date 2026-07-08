@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+/**
+ * Copyright (C) 2025 The WayDroid Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+-->
+
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <!-- Label for the WayDroid-ATV system components when they are shown to the user. -->
+    <string name="waydroid_notification_channel">Waydroid warnings</string>
+
+    <string name="waydroid_system_label">WayDroid-ATV System</string>
+
+    <string name="broken_waydroid_integration_title">Waydroid integration is not functional</string>
+    <string name="broken_waydroid_integration_msg">(Click this notification for more information) Things like "waydroid app install" will not work</string>
+    <string name="broken_waydroid_integration_url">https://github.com/WayDroid-ATV/docs/wiki/%5BFAQ%5D-Waydroid-integration-support</string>
+
+    <string name="dmabuf_missing_title">Missing DMA-BUF support</string>
+    <string name="dmabuf_missing_msg">DMA-BUF system heap does not exist (or not supported by the kernel), video playback might not work properly</string>
+    <string name="dmabuf_missing_url">https://github.com/WayDroid-ATV/docs/wiki/%5BFAQ%5D-Video-playback#21-dma-buf-heap-support-in-kernel</string>
+
+    <string name="unsupported_nvidia_kmd_title">Unsupported NVIDIA kernel driver detected</string>
+    <string name="unsupported_nvidia_kmd_msg">Only the nouveau kernel driver is supported currently, consider switching to nouveau for proper GPU acceleration support</string>
+    <string name="unsupported_nvidia_kmd_url">https://github.com/WayDroid-ATV/docs/wiki/%5BFAQ%5D-GPU-acceleration</string>
+
+    <string name="sw_rendering_title">Waydroid is running without GPU acceleration</string>
+    <string name="sw_rendering_msg">GPU acceleration support is either missing or explicitly disabled</string>
+    <string name="sw_rendering_url">https://github.com/WayDroid-ATV/docs/wiki/%5BFAQ%5D-GPU-acceleration</string>
+</resources>

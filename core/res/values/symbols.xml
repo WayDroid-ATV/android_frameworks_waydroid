@@ -21,4 +21,24 @@
     <!-- External WayDroid specific core services -->
     <java-symbol type="array" name="config_externalWayDroidServices" />
 
+    <java-symbol type="drawable" name="ic_warning" />
+
+    <!-- Colors -->
+    <java-symbol type="color" name="color_error" />
+
+    <!-- Waydroid -->
+    <java-symbol type="string" name="waydroid_notification_channel" />
+    <java-symbol type="string" name="broken_waydroid_integration_title" />
+    <java-symbol type="string" name="broken_waydroid_integration_msg" />
+    <java-symbol type="string" name="broken_waydroid_integration_url" />
+    <java-symbol type="string" name="dmabuf_missing_title" />
+    <java-symbol type="string" name="dmabuf_missing_msg" />
+    <java-symbol type="string" name="dmabuf_missing_url" />
+    <java-symbol type="string" name="unsupported_nvidia_kmd_title" />
+    <java-symbol type="string" name="unsupported_nvidia_kmd_msg" />
+    <java-symbol type="string" name="unsupported_nvidia_kmd_url" />
+    <java-symbol type="string" name="sw_rendering_title" />
+    <java-symbol type="string" name="sw_rendering_msg" />
+    <java-symbol type="string" name="sw_rendering_url" />
+
 </resources>
