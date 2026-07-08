@@ -27,29 +27,29 @@ import java.util.NoSuchElementException;
 import id.waydro.app.WaydroidContextConstants;
 import vendor.waydroid.clipboard.V1_0.IWaydroidClipboard;
 
-public class Clipboard {
+public class WaydroidClipboard {
     private static final String TAG = "WayDroidClipboard";
 
     private static IWaydroidClipboard sService;
-    private static Clipboard sInstance;
+    private static WaydroidClipboard sInstance;
 
     private Context mContext;
 
-    private Clipboard(Context context) {
+    private WaydroidClipboard(Context context) {
         Context appContext = context.getApplicationContext();
         mContext = appContext == null ? context : appContext;
         sService = getService();
     }
 
     /**
-     * Get or create an instance of the {@link id.waydro.waydroid.Clipboard}
+     * Get or create an instance of the {@link id.waydro.waydroid.WaydroidClipboard}
      *
      * @param context Used to get the service
-     * @return {@link Clipboard}
+     * @return {@link WaydroidClipboard}
      */
-    public static Clipboard getInstance(Context context) {
+    public static WaydroidClipboard getInstance(Context context) {
         if (sInstance == null) {
-            sInstance = new Clipboard(context);
+            sInstance = new WaydroidClipboard(context);
         }
         return sInstance;
     }
