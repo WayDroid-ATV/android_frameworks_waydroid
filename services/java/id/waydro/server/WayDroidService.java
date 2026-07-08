@@ -651,11 +651,12 @@ public class WayDroidService extends SystemService {
                 }
                 // Create a PendingIntent and use it to generate the IntentSender
                 Intent broadcastIntent = new Intent(BROADCAST_ACTION_INSTALL);
+                broadcastIntent.setPackage(mContext.getPackageName());
                 PendingIntent pendingIntent = PendingIntent.getBroadcast(
                         mContext,
                         sessionId,
                         broadcastIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
                 session.commit(pendingIntent.getIntentSender());
             } catch (Exception e) {
                 Log.e(TAG, "Failure", e);
