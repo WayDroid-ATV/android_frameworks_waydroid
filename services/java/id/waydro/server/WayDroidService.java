@@ -32,7 +32,9 @@ import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.ResolveInfo;
+import android.os.Binder;
 import android.os.IBinder;
+import android.os.Parcel;
 import android.os.PowerManager;
 import android.os.RemoteException;
 import android.os.SystemClock;
@@ -546,6 +548,22 @@ public class WayDroidService extends SystemService {
 
     /* Service */
     private final IBinder mPlatformService = new IPlatform.Stub() {
+        /* Calls arrive from the Waydroid host, whose uid means nothing to
+         * Android, so anything that reaches a framework service checking the
+         * caller (startActivity, Settings writes, PowerManager) is refused with
+         * a SecurityException. Run every method with the identity of the system
+         * process we already live in. */
+        @Override
+        public boolean onTransact(int code, Parcel data, Parcel reply, int flags)
+                throws RemoteException {
+            final long ident = Binder.clearCallingIdentity();
+            try {
+                return super.onTransact(code, data, reply, flags);
+            } finally {
+                Binder.restoreCallingIdentity(ident);
+            }
+        }
+
         @Override
         public String getprop(String prop, String default_value) {
             return SystemProperties.get(prop, default_value);
