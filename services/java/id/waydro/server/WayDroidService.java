@@ -16,10 +16,12 @@
 
 package id.waydro.server;
 
+import android.app.ActivityTaskManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.app.TaskStackListener;
 import android.annotation.NonNull;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
@@ -151,6 +153,9 @@ public class WayDroidService extends SystemService {
 
     @Override
     public void onBootPhase(int phase) {
+        if (phase == PHASE_ACTIVITY_MANAGER_READY) {
+            registerTaskStackMonitor();
+        }
         if (phase == PHASE_BOOT_COMPLETED) {
             mNotificationManager = mContext.getSystemService(NotificationManager.class);
 
@@ -511,6 +516,55 @@ public class WayDroidService extends SystemService {
                 // TODO: Activate window through hwcomposer
             }
         });
+    }
+
+    /* Per-app window mode keys off waydroid.active_apps, but only host-side
+     * launches write it. Android-side navigation (in-app intents, notifications,
+     * task switches) leaves it stale, and cards/input then target the wrong app.
+     * Publish the real foreground task whenever the task stack changes. */
+    private void registerTaskStackMonitor() {
+        try {
+            ActivityTaskManager.getService().registerTaskStackListener(new TaskStackListener() {
+                @Override
+                public void onTaskStackChanged() {
+                    BackgroundThread.getHandler().post(WayDroidService.this::syncActiveApps);
+                }
+
+                @Override
+                public void onTaskMovedToFront(int taskId) {
+                    BackgroundThread.getHandler().post(WayDroidService.this::syncActiveApps);
+                }
+            });
+        } catch (RemoteException e) {
+            Log.e(TAG, "Unable to register task stack listener", e);
+        }
+    }
+
+    private void syncActiveApps() {
+        String current = SystemProperties.get("waydroid.active_apps", "none");
+        // The host owns closed ("none") and full-ui ("Waydroid") modes
+        if (current.equals("none") || current.equals("Waydroid"))
+            return;
+
+        String pkg;
+        try {
+            ActivityTaskManager.RootTaskInfo info =
+                    ActivityTaskManager.getService().getFocusedRootTaskInfo();
+            if (info == null || info.topActivity == null)
+                return;
+            pkg = info.topActivity.getPackageName();
+        } catch (RemoteException e) {
+            return;
+        }
+        if (pkg.equals(current) || pkg.equals("android"))
+            return;
+        // The hidden launcher in front means "everything backgrounded", not an app switch
+        for (String hidden : SystemProperties.get("waydroid.blacklist_apps", "").split(":")) {
+            if (pkg.equals(hidden))
+                return;
+        }
+        Log.i(TAG, "Foreground task changed, active_apps " + current + " -> " + pkg);
+        SystemProperties.set("waydroid.active_apps", pkg);
     }
 
     private void registerShutdownHandler() {
