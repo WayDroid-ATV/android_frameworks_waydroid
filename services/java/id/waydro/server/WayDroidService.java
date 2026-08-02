@@ -51,8 +51,10 @@ import android.graphics.drawable.Icon;
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.Config;
 import android.graphics.Canvas;
+import android.hardware.HardwareBuffer;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
+import android.window.TaskSnapshot;
 
 import com.android.internal.content.PackageMonitor;
 import com.android.internal.os.BackgroundThread;
@@ -81,6 +83,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.FileOutputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 import libcore.io.IoUtils;
 
@@ -154,6 +158,7 @@ public class WayDroidService extends SystemService {
     @Override
     public void onBootPhase(int phase) {
         if (phase == PHASE_ACTIVITY_MANAGER_READY) {
+            clearTaskSnapshots(); // task IDs restart per boot
             registerTaskStackMonitor();
         }
         if (phase == PHASE_BOOT_COMPLETED) {
@@ -565,6 +570,160 @@ public class WayDroidService extends SystemService {
         }
         Log.i(TAG, "Foreground task changed, active_apps " + current + " -> " + pkg);
         SystemProperties.set("waydroid.active_apps", pkg);
+    }
+
+    /* Live task IDs, so the hwcomposer can close cards whose task is gone
+     * (a dead task's card otherwise lingers forever, and its open.<pkg> prop
+     * makes the host launcher think the app is still running — icon clicks
+     * then focus the zombie card instead of launching). */
+    private void publishTaskList() {
+        try {
+            List<android.app.ActivityManager.RunningTaskInfo> tasks =
+                    ActivityTaskManager.getService().getTasks(200,
+                            false /* filterOnlyVisibleRecents */,
+                            true /* keepIntentExtra */,
+                            android.view.Display.INVALID_DISPLAY);
+            StringBuilder sb = new StringBuilder();
+            for (android.app.ActivityManager.RunningTaskInfo t : tasks) {
+                if (sb.length() > 0)
+                    sb.append(',');
+                sb.append(t.taskId);
+            }
+            SystemProperties.set("waydroid.task_list", sb.toString());
+        } catch (Exception e) {
+            Log.w(TAG, "publishTaskList failed: " + e);
+        }
+    }
+
+    private int mLastForegroundTaskId = -1;
+
+    private void syncActiveApps() {
+        publishTaskList();
+
+        String current = SystemProperties.get("waydroid.active_apps", "none");
+        // The host owns closed ("none") and full-ui ("Waydroid") modes
+        if (current.equals("none") || current.equals("Waydroid"))
+            return;
+
+        String pkg;
+        int taskId;
+        try {
+            ActivityTaskManager.RootTaskInfo info =
+                    ActivityTaskManager.getService().getFocusedRootTaskInfo();
+            if (info == null || info.topActivity == null)
+                return;
+            pkg = info.topActivity.getPackageName();
+            taskId = info.taskId;
+        } catch (RemoteException e) {
+            return;
+        }
+
+        /* Any focus change means the previous foreground task just went to the
+         * background: save its WMS snapshot (taken by SnapshotController at
+         * transition start, i.e. with correct pre-switch content) for the
+         * hwcomposer to freeze the card with. */
+        if (taskId != mLastForegroundTaskId) {
+            final int outgoing = mLastForegroundTaskId;
+            mLastForegroundTaskId = taskId;
+            if (outgoing > 0)
+                saveTaskSnapshot(outgoing);
+        }
+
+        if (pkg.equals(current) || pkg.equals("android"))
+            return;
+        // The hidden launcher in front means "everything backgrounded", not an app switch
+        for (String hidden : SystemProperties.get("waydroid.blacklist_apps", "").split(":")) {
+            if (pkg.equals(hidden))
+                return;
+        }
+        Log.i(TAG, "Foreground task changed, active_apps " + current + " -> " + pkg);
+        SystemProperties.set("waydroid.active_apps", pkg);
+    }
+
+    private static final String SNAPSHOTS_DIR = "/data/waydroid_snapshots";
+    private static final int SNAPSHOT_MAGIC = 0x57444150; // "WDAP"
+
+    /* Dump a task's snapshot as raw RGBA (16-byte header: magic, width,
+     * height, rowBytes) where the hwcomposer can pick it up. Task IDs restart
+     * per boot, so the directory is wiped in onStart. */
+    private void saveTaskSnapshot(int taskId) {
+        try {
+            TaskSnapshot snap = ActivityTaskManager.getService()
+                    .getTaskSnapshot(taskId, false /* isLowResolution */);
+            if (snap == null) {
+                /* Nothing recorded (our launcher-less setup rarely triggers
+                 * SnapshotController); render the task's layers now instead.
+                 * Forced capture during a display-off transition deadlocked
+                 * system_server into a watchdog kill (blocked android.display
+                 * + AMS for 71s), and a task mid-teardown is equally unsafe —
+                 * only capture live tasks on an interactive display. */
+                PowerManager pm = mContext.getSystemService(PowerManager.class);
+                if (pm == null || !pm.isInteractive())
+                    return;
+                boolean alive = false;
+                for (android.app.ActivityManager.RunningTaskInfo t :
+                        ActivityTaskManager.getService().getTasks(200, false, true,
+                                android.view.Display.INVALID_DISPLAY)) {
+                    if (t.taskId == taskId && t.isRunning) {
+                        alive = true;
+                        break;
+                    }
+                }
+                if (!alive)
+                    return;
+                snap = ActivityTaskManager.getService()
+                        .takeTaskSnapshot(taskId, false /* updateCache */);
+            }
+            if (snap == null) {
+                Log.w(TAG, "No snapshot obtainable for task " + taskId);
+                return;
+            }
+            HardwareBuffer hwBuffer = snap.getHardwareBuffer();
+            if (hwBuffer == null)
+                return;
+            Bitmap hwBitmap = Bitmap.wrapHardwareBuffer(hwBuffer, snap.getColorSpace());
+            if (hwBitmap == null)
+                return;
+            Bitmap bitmap = hwBitmap.copy(Bitmap.Config.ARGB_8888, false);
+            hwBitmap.recycle();
+            if (bitmap == null)
+                return;
+
+            File dir = new File(SNAPSHOTS_DIR);
+            if (!dir.exists()) {
+                dir.mkdirs();
+                dir.setReadable(true, false);
+                dir.setExecutable(true, false);
+            }
+            ByteBuffer pixels = ByteBuffer.allocate(bitmap.getRowBytes() * bitmap.getHeight());
+            bitmap.copyPixelsToBuffer(pixels);
+            ByteBuffer header = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
+            header.putInt(SNAPSHOT_MAGIC);
+            header.putInt(bitmap.getWidth());
+            header.putInt(bitmap.getHeight());
+            header.putInt(bitmap.getRowBytes());
+
+            File tmp = new File(dir, "." + taskId + ".tmp");
+            try (FileOutputStream out = new FileOutputStream(tmp)) {
+                out.write(header.array());
+                out.write(pixels.array());
+            }
+            File dst = new File(dir, taskId + ".raw");
+            tmp.renameTo(dst);
+            dst.setReadable(true, false);
+            bitmap.recycle();
+            Log.i(TAG, "Saved snapshot of task " + taskId);
+        } catch (Exception e) {
+            Log.w(TAG, "Snapshot of task " + taskId + " failed: " + e);
+        }
+    }
+
+    private void clearTaskSnapshots() {
+        File[] files = new File(SNAPSHOTS_DIR).listFiles();
+        if (files == null)
+            return;
+        for (File f : files)
+            f.delete();
     }
 
     private void registerShutdownHandler() {
