@@ -93,7 +93,9 @@ java_library_static {
     name: "framework-waydroid.static",
     srcs: [":framework-waydroid-sources"],
     static_libs: [
+        "android.hidl.manager-V1.0-java",
         "vendor.waydroid.clipboard-V1.0-java",
+        "vendor.waydroid.window-V1.3-java",
     ],
 }
 
@@ -101,7 +103,9 @@ java_sdk_library {
     name: "framework-waydroid",
     srcs: [":framework-waydroid-sources"],
     static_libs: [
+        "android.hidl.manager-V1.0-java",
         "vendor.waydroid.clipboard-V1.0-java",
+        "vendor.waydroid.window-V1.3-java",
     ],
 
     api_packages: ["framework-waydroid"],
