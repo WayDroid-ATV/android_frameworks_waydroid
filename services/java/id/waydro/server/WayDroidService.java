@@ -624,27 +624,47 @@ public class WayDroidService extends SystemService {
         }
     }
 
+    private static final int MAX_SNAPSHOT_TASKS = 200;
+
+    private int mTaskGeneration;
+
+    /* Send the whole table in one call: replaying taskCreated per task could
+     * not tell the HAL which of its entries WMS had since dropped, so a lost
+     * taskRemoved leaked an entry (and its close-pending mark) forever. */
     private void resyncTasks() {
         IWaydroidWindow hal = getWindowHal();
         if (hal == null)
             return;
         try {
             List<android.app.ActivityManager.RunningTaskInfo> tasks =
-                    ActivityTaskManager.getService().getTasks(200,
+                    ActivityTaskManager.getService().getTasks(MAX_SNAPSHOT_TASKS,
                             false /* filterOnlyVisibleRecents */,
                             true /* keepIntentExtra */,
                             android.view.Display.INVALID_DISPLAY);
+            if (tasks.size() >= MAX_SNAPSHOT_TASKS) {
+                /* A truncated list would read as "these tasks are gone" and
+                 * close live cards. */
+                Log.w(TAG, "Task list hit the " + MAX_SNAPSHOT_TASKS
+                        + " cap; skipping the snapshot");
+                return;
+            }
+            ActivityTaskManager.RootTaskInfo focusedRoot =
+                    ActivityTaskManager.getService().getFocusedRootTaskInfo();
+            int focusedId = focusedRoot != null ? focusedRoot.taskId : -1;
+
+            ArrayList<IWaydroidWindow.TaskInfo> snapshot = new ArrayList<>(tasks.size());
             for (android.app.ActivityManager.RunningTaskInfo t : tasks) {
                 ComponentName c = t.realActivity != null ? t.realActivity : t.baseActivity;
-                hal.taskCreated(t.taskId,
-                        c != null ? c.getPackageName() : "",
-                        c != null ? c.flattenToShortString() : "");
+                IWaydroidWindow.TaskInfo info = new IWaydroidWindow.TaskInfo();
+                info.taskID = t.taskId;
+                info.packageName = c != null ? c.getPackageName() : "";
+                info.componentName = c != null ? c.flattenToShortString() : "";
+                info.focused = t.isFocused || t.taskId == focusedId;
+                snapshot.add(info);
             }
-            ActivityTaskManager.RootTaskInfo focused =
-                    ActivityTaskManager.getService().getFocusedRootTaskInfo();
-            if (focused != null && focused.taskId > 0)
-                hal.taskFocusChanged(focused.taskId, true);
-            Log.i(TAG, "Resynced " + tasks.size() + " tasks to the window HAL");
+            hal.taskListSnapshot(++mTaskGeneration, snapshot);
+            Log.i(TAG, "Snapshot #" + mTaskGeneration + ": resynced "
+                    + snapshot.size() + " tasks to the window HAL");
         } catch (Exception e) {
             Log.w(TAG, "Task table resync failed: " + e);
             dropWindowHal();
