@@ -303,6 +303,61 @@ public class WayDroidService extends SystemService {
         return launchIntent;
     }
 
+    /* Most recent task of the package, or -1. getTasks is ordered
+     * most-recent-first, so the first match is the one to front. */
+    private int findTaskForPackage(String packageName) {
+        try {
+            List<android.app.ActivityManager.RunningTaskInfo> tasks =
+                    ActivityTaskManager.getService().getTasks(MAX_SNAPSHOT_TASKS,
+                            false /* filterOnlyVisibleRecents */,
+                            false /* keepIntentExtra */,
+                            android.view.Display.INVALID_DISPLAY);
+            for (android.app.ActivityManager.RunningTaskInfo t : tasks) {
+                if (packageMatches(t.topActivity, packageName)
+                        || packageMatches(t.realActivity, packageName)
+                        || packageMatches(t.baseActivity, packageName))
+                    return t.taskId;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "findTaskForPackage failed: " + e);
+        }
+        return -1;
+    }
+
+    private static boolean packageMatches(ComponentName component, String packageName) {
+        return component != null && packageName.equals(component.getPackageName());
+    }
+
+    /* Front the app's existing task, or start its launcher activity if it has
+     * none. Fronting rather than restarting keeps the task's back stack, which
+     * is what tapping a host icon for a running app should do. */
+    private boolean frontOrLaunch(String packageName, String reason) {
+        if (mPm == null || mContext == null)
+            return false;
+
+        Intent launchIntent = getAppLaunchIntent(packageName);
+        if (launchIntent == null) {
+            Log.w(TAG, "no launchable activity for " + packageName);
+            return false;
+        }
+
+        wakeUpDevice(reason);
+
+        int taskId = findTaskForPackage(packageName);
+        if (taskId > 0) {
+            try {
+                ActivityTaskManager.getService().moveTaskToFront(null /* appThread */,
+                        "android", taskId, 0 /* flags */, null /* options */);
+                return true;
+            } catch (Exception e) {
+                Log.w(TAG, "moveTaskToFront(" + taskId + ") failed: " + e);
+            }
+        }
+
+        mContext.startActivity(launchIntent);
+        return true;
+    }
+
     private void saveApplicationIcon(String packageName) {
         Drawable icon = null;
         try {
@@ -741,7 +796,8 @@ public class WayDroidService extends SystemService {
         publishTaskList();
 
         String current = SystemProperties.get("waydroid.active_apps", "none");
-        // The host owns closed ("none") and full-ui ("Waydroid") modes
+        // Only per-app mode follows the foreground task; closed ("none") and
+        // full-ui ("Waydroid") are host requests, not app switches
         if (current.equals("none") || current.equals("Waydroid"))
             return;
 
@@ -1071,23 +1127,30 @@ public class WayDroidService extends SystemService {
 
         @Override
         public void launchApp(String packageName) {
-            if (mPm == null || mContext == null)
-                return;
+            frontOrLaunch(packageName, "waydroid:launchApp");
+        }
 
-            ApplicationInfo appInfo;
-            try {
-                appInfo = mPm.getApplicationInfo(packageName, 0);
-            } catch (NameNotFoundException e) {
-                Log.e(TAG, e.getMessage());
-                return;
+        /* The host used to set waydroid.active_apps itself and then call
+         * launchApp. Two calls means two truths: a launch that failed left the
+         * mode pointing at an app with no window, which fail-closes the
+         * hwcomposer's task gate and stops anything rendering. */
+        @Override
+        public boolean showApp(String packageName) {
+            if (mPm == null || mContext == null
+                    || getAppLaunchIntent(packageName) == null) {
+                Log.w(TAG, "showApp: nothing launchable for " + packageName);
+                return false;
             }
-            Intent launchIntent = getAppLaunchIntent(appInfo.packageName);
-            if (launchIntent == null) {
-                return;
-            }
+            /* Mode first: the hwcomposer only creates a window for the app it
+             * is already in per-app mode for. */
+            SystemProperties.set("waydroid.active_apps", packageName);
+            return frontOrLaunch(packageName, "waydroid:showApp");
+        }
 
-            wakeUpDevice("waydroid:launchApp");
-            mContext.startActivity(launchIntent);
+        @Override
+        public void showFullUI() {
+            wakeUpDevice("waydroid:showFullUI");
+            SystemProperties.set("waydroid.active_apps", "Waydroid");
         }
 
         @Override

@@ -35,4 +35,12 @@ interface IPlatform {
     void settingsPutInt(int mode, String key, int value);
     int settingsGetInt(int mode, String key);
     String launchIntent(String action, String uri);
+
+    /* Append only: the host keys off transaction numbers, which follow
+     * declaration order here. */
+
+    /* Show an app in the host shell: one call for the window mode and the
+     * launch, so the two cannot disagree. False means nothing launchable. */
+    boolean showApp(String packageName);
+    void showFullUI();
 }
