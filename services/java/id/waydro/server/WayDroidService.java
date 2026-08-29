@@ -33,7 +33,9 @@ import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.ResolveInfo;
 import android.os.IBinder;
+import android.os.PowerManager;
 import android.os.RemoteException;
+import android.os.SystemClock;
 import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.provider.Settings;
@@ -257,6 +259,17 @@ public class WayDroidService extends SystemService {
         }
 
         mNotificationManager.notify(notificationId, notification.build());
+    }
+
+    /* While asleep SurfaceFlinger stops compositing, so an activity started
+     * from the host never produces a window on the Wayland side. Wake up
+     * first so host-initiated launches always surface. */
+    private void wakeUpDevice(String details) {
+        PowerManager pm = mContext.getSystemService(PowerManager.class);
+        if (pm != null && !pm.isInteractive()) {
+            pm.wakeUp(SystemClock.uptimeMillis(),
+                    PowerManager.WAKE_REASON_APPLICATION, details);
+        }
     }
 
     private Intent getAppLaunchIntent(String packageName) {
@@ -702,6 +715,7 @@ public class WayDroidService extends SystemService {
                 return;
             }
 
+            wakeUpDevice("waydroid:launchApp");
             mContext.startActivity(launchIntent);
         }
 
@@ -719,6 +733,7 @@ public class WayDroidService extends SystemService {
 
             ResolveInfo ri = mPm.resolveActivity(i, 0);
             try {
+                wakeUpDevice("waydroid:launchIntent");
                 mContext.startActivity(i);
             } catch (ActivityNotFoundException ignored) {}
 
