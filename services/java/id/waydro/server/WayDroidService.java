@@ -165,6 +165,7 @@ public class WayDroidService extends SystemService {
             clearTaskSnapshots(); // task IDs restart per boot
             registerTaskStackMonitor();
             registerWindowHalNotification();
+            registerWindowModeMonitor();
         }
         if (phase == PHASE_BOOT_COMPLETED) {
             mNotificationManager = mContext.getSystemService(NotificationManager.class);
@@ -677,6 +678,48 @@ public class WayDroidService extends SystemService {
         } catch (Exception e) {
             Log.w(TAG, "Unable to watch for the window HAL: " + e);
         }
+    }
+
+    /* The framework must not read waydroid props: they are stale by design, and with no SELinux
+     * in the container any app can read them. Translate the host's mode into a single setting
+     * here instead, mirroring the hwcomposer's select_mode -- a task gets a host window of its
+     * own only in multi-window mode, and only while the host asks for apps rather than for the
+     * whole UI ("Waydroid") or for nothing ("none").
+     * Blind spot: the hwcomposer also drops multi-window when the host binds no wl_subcompositor. */
+    private static final String SETTING_PER_APP_WINDOWS = "per_app_host_windows";
+
+    private volatile boolean mPerAppWindows;
+
+    private boolean readPerAppWindows() {
+        if (!SystemProperties.getBoolean("persist.waydroid.multi_windows", false))
+            return false;
+        String activeApps = SystemProperties.get("waydroid.active_apps", "Waydroid");
+        return !activeApps.equals("Waydroid") && !activeApps.equals("none");
+    }
+
+    private void publishWindowMode() {
+        try {
+            Settings.Global.putInt(mContext.getContentResolver(), SETTING_PER_APP_WINDOWS,
+                    mPerAppWindows ? 1 : 0);
+        } catch (Exception e) {
+            Log.w(TAG, "publishWindowMode failed: " + e);
+        }
+    }
+
+    /* active_apps is written by the host, by the hwcomposer and by us, so a property callback is
+     * the only place that sees every change. It fires for every property in the container, so
+     * compare first and only touch settings when the mode really flips. */
+    private void registerWindowModeMonitor() {
+        mPerAppWindows = readPerAppWindows();
+        publishWindowMode();
+        SystemProperties.addChangeCallback(() -> {
+            boolean perAppWindows = readPerAppWindows();
+            if (perAppWindows == mPerAppWindows)
+                return;
+            mPerAppWindows = perAppWindows;
+            Log.i(TAG, "Host window mode changed, per-app windows " + perAppWindows);
+            BackgroundThread.getHandler().post(this::publishWindowMode);
+        });
     }
 
     private static final int MAX_SNAPSHOT_TASKS = 200;
