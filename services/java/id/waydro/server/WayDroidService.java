@@ -57,6 +57,7 @@ import android.hardware.HardwareBuffer;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.window.TaskSnapshot;
+import android.window.TaskSnapshotManager;
 
 import com.android.internal.content.PackageMonitor;
 import com.android.internal.os.BackgroundThread;
@@ -970,7 +971,7 @@ public class WayDroidService extends SystemService {
     private void saveTaskSnapshot(int taskId) {
         try {
             TaskSnapshot snap = ActivityTaskManager.getService()
-                    .getTaskSnapshot(taskId, false /* isLowResolution */);
+                    .getTaskSnapshotManager().getTaskSnapshot(taskId, 0 /* latestCaptureTime */, TaskSnapshotManager.RESOLUTION_HIGH);
             if (snap == null) {
                 /* Nothing recorded (our launcher-less setup rarely triggers
                  * SnapshotController); render the task's layers now instead.
@@ -993,7 +994,7 @@ public class WayDroidService extends SystemService {
                 if (!alive)
                     return;
                 snap = ActivityTaskManager.getService()
-                        .takeTaskSnapshot(taskId, false /* updateCache */);
+                        .getTaskSnapshotManager().takeTaskSnapshot(taskId, false /* updateCache */, false /* lowResolution */, false /* includeDecors */);
             }
             if (snap == null) {
                 Log.w(TAG, "No snapshot obtainable for task " + taskId);
