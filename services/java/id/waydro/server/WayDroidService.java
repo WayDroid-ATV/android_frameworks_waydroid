@@ -39,6 +39,7 @@ import android.content.pm.ResolveInfo;
 import android.os.Binder;
 import android.os.IBinder;
 import android.os.Parcel;
+import android.os.ParcelFileDescriptor;
 import android.os.PowerManager;
 import android.os.RemoteException;
 import android.os.SystemClock;
@@ -1106,6 +1107,11 @@ public class WayDroidService extends SystemService {
 
         @Override
         public void setprop(String prop, String value) {
+            Log.e(TAG, "hello??????");
+            ParcelFileDescriptor a = mWaydroidHardware.enableBluetooth(true);
+            if (a == null)
+                Log.e(TAG, String.format("bluetooth: null"));
+
             SystemProperties.set(prop, value);
         }
 

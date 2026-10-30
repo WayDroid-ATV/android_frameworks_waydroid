@@ -18,6 +18,7 @@ package id.waydro.waydroid;
 
 import android.content.Context;
 import android.os.IBinder;
+import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.util.Log;
@@ -86,17 +87,17 @@ public class Hardware {
         return ERROR_UNDEFINED;
     }
 
-    public int enableBluetooth(boolean enable) {
+    public ParcelFileDescriptor enableBluetooth(boolean enable) {
         IHardware service = getService();
         if (service == null) {
-            return ERROR_UNDEFINED;
+            return null;
         }
         try {
             return service.enableBluetooth(enable);
         } catch (RemoteException e) {
             Log.e(TAG, e.getLocalizedMessage(), e);
         }
-        return ERROR_UNDEFINED;
+        return null;
     }
 
     public void suspend() {
